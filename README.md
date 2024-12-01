@@ -2,8 +2,6 @@
 
 A cross-platform GUI application for signing iOS IPA files. This tool provides a simple and user-friendly interface for signing iOS applications with custom certificates.
 
-![IPA Signer Screenshot](docs/screenshot.png)
-
 ## Features
 
 - User-friendly graphical interface
