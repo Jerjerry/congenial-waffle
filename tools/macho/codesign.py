@@ -112,25 +112,20 @@ class CodeSignatureBuilder:
         code_limit = len(self.macho_data)
         code_hashes = self._calculate_code_hashes(code_limit)
         
-        # Calculate base size and offsets
-        base_size = 8  # SuperBlob header
-        base_size += 8  # One BlobIndex
-        
-        # Create CodeDirectory
-        identifier = "*"  # Default identifier
+        # Create CodeDirectory with all required fields
         cd = CodeDirectory(
-            magic=CSMAGIC_CODEDIRECTORY,
-            length=0,  # Will be calculated during to_bytes()
-            version=0x20400,  # Latest version
-            flags=CS_ADHOC | CS_GET_TASK_ALLOW,  # Enable debugging
-            hashOffset=0,  # Will be calculated during to_bytes()
-            identOffset=0,  # Will be calculated during to_bytes()
+            magic=0xfade0c02,  # CSMAGIC_CODEDIRECTORY
+            length=0,  # Will be calculated during serialization
+            version=0x20400,
+            flags=0x00000002 | 0x00000004,  # CS_ADHOC | CS_GET_TASK_ALLOW
+            hashOffset=0,  # Will be calculated during serialization
+            identOffset=44,  # Fixed offset for identifier
             nSpecialSlots=0,
             nCodeSlots=len(code_hashes),
             codeLimit=code_limit,
             hashSize=32,  # SHA256
-            hashType=CS_HASHTYPE_SHA256,
-            platform=0,  # Not platform specific
+            hashType=2,  # CS_HASHTYPE_SHA256
+            platform=0,
             pageSize=12,  # 4096 (2^12)
             spare2=0,
             scatterOffset=0,
@@ -142,45 +137,31 @@ class CodeSignatureBuilder:
             execSegFlags=0,
             runtime=0,
             preEncryptOffset=0,
-            identifier=identifier,
+            identifier="*",
+            teamId=None,
             hashes=code_hashes
         )
         
         # Convert CodeDirectory to bytes
         cd_data = cd.to_bytes()
-        cd_offset = base_size
         
-        # Create blob index for CodeDirectory
-        cd_index = BlobIndex(
-            type=CS_SLOTID_CODEDIRECTORY,
-            offset=cd_offset
-        )
+        # Create SuperBlob containing the CodeDirectory
+        cd_offset = 8 + 8  # SuperBlob header (8) + BlobIndex entry (8)
+        cd_index = BlobIndex(type=CS_SLOTID_CODEDIRECTORY, offset=cd_offset)
         
-        # Create SuperBlob
-        sb = SuperBlob(
-            magic=CSMAGIC_EMBEDDED_SIGNATURE,
-            length=base_size + len(cd_data),
-            count=1,
-            blobs=[cd_index]
-        )
-        
-        # Build the complete signature
+        # Create the complete signature
         signature = bytearray()
         
         # Add SuperBlob header
-        signature.extend(struct.pack('>I', sb.magic))
-        signature.extend(struct.pack('>I', sb.length))
-        signature.extend(struct.pack('>I', sb.count))
+        signature.extend(struct.pack('>I', CSMAGIC_EMBEDDED_SIGNATURE))  # magic
+        signature.extend(struct.pack('>I', cd_offset + len(cd_data)))  # length
+        signature.extend(struct.pack('>I', 1))  # count
         
         # Add BlobIndex
         signature.extend(struct.pack('>II', cd_index.type, cd_index.offset))
         
-        # Add CodeDirectory data
+        # Add CodeDirectory
         signature.extend(cd_data)
-        
-        # Add code hashes
-        for hash_value in code_hashes:
-            signature.extend(hash_value)
         
         return bytes(signature)
         

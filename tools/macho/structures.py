@@ -47,6 +47,7 @@ class LoadCommand:
 
 @dataclass
 class SegmentCommand64:
+    """64-bit segment command."""
     segname: str
     vmaddr: int
     vmsize: int
@@ -60,20 +61,22 @@ class SegmentCommand64:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'SegmentCommand64':
-        cmd, cmdsize = struct.unpack('<II', data[:8])
+        """Create from binary data."""
+        if len(data) < 72:  # Minimum size of segment_command_64
+            raise ValueError("Data too small for segment_command_64")
+            
         segname = data[8:24].decode('utf-8').rstrip('\0')
         vmaddr, vmsize, fileoff, filesize, maxprot, initprot, nsects, flags = struct.unpack('<QQQQ4I', data[24:72])
         
+        # Parse sections
         sections = []
         offset = 72
         for _ in range(nsects):
-            if offset + 80 > len(data):
+            if offset + 80 > len(data):  # Size of section_64
                 break
-            section_data = data[offset:offset + 80]
-            section = Section64.from_bytes(section_data)
-            sections.append(section)
+            sections.append(Section64.from_bytes(data[offset:offset + 80]))
             offset += 80
-            
+        
         return cls(
             segname=segname,
             vmaddr=vmaddr,
@@ -161,6 +164,7 @@ class SuperBlob:
 
 @dataclass
 class CodeDirectory:
+    """Code Directory structure for code signing."""
     magic: int
     length: int
     version: int
@@ -188,64 +192,102 @@ class CodeDirectory:
     teamId: Optional[str] = None
     hashes: Optional[List[bytes]] = None
 
+    @staticmethod
+    def create(identifier: str, code_limit: int, code_hashes: List[bytes]) -> 'CodeDirectory':
+        """Create a new CodeDirectory with calculated fields."""
+        # Calculate sizes and offsets
+        base_size = 44  # Size up to platform field
+        identifier_bytes = identifier.encode('ascii', errors='ignore') + b'\0'
+        identifier_offset = base_size
+        hash_offset = base_size + ((len(identifier_bytes) + 3) & ~3)  # Align to 4 bytes
+        total_size = hash_offset + (len(code_hashes) * 32)  # 32 is SHA256 hash size
+        
+        return CodeDirectory(
+            magic=0xfade0c02,  # CSMAGIC_CODEDIRECTORY
+            length=total_size,
+            version=0x20400,  # Latest version
+            flags=0x00000002 | 0x00000004,  # CS_ADHOC | CS_GET_TASK_ALLOW
+            hashOffset=hash_offset,
+            identOffset=identifier_offset,
+            nSpecialSlots=0,
+            nCodeSlots=len(code_hashes),
+            codeLimit=code_limit,
+            hashSize=32,  # SHA256
+            hashType=2,  # CS_HASHTYPE_SHA256
+            platform=0,
+            pageSize=12,  # 4096 (2^12)
+            spare2=0,
+            scatterOffset=0,
+            teamOffset=0,
+            spare3=0,
+            codeLimit64=0,
+            execSegBase=0,
+            execSegLimit=0,
+            execSegFlags=0,
+            runtime=0,
+            preEncryptOffset=0,
+            identifier=identifier,
+            teamId=None,
+            hashes=code_hashes
+        )
+
     def to_bytes(self) -> bytes:
         """Convert CodeDirectory to bytes."""
-        # Calculate offsets and sizes
-        base_size = 44  # Size up to platform field
-        
-        # Convert identifier to bytes and add null terminator
-        identifier_bytes = self.identifier.encode('ascii', errors='ignore') + b'\0'
-        identifier_offset = base_size
-        total_size = base_size + len(identifier_bytes)
-        
-        # Align to 4 bytes
-        total_size = (total_size + 3) & ~3
-        
-        # Create the basic structure
         data = bytearray()
-        data.extend(struct.pack('>I', self.magic))  # magic
-        data.extend(struct.pack('>I', total_size))  # length
-        data.extend(struct.pack('>I', self.version))  # version
-        data.extend(struct.pack('>I', self.flags))  # flags
-        data.extend(struct.pack('>I', self.hashOffset))  # hashOffset
-        data.extend(struct.pack('>I', identifier_offset))  # identOffset
-        data.extend(struct.pack('>I', self.nSpecialSlots))  # nSpecialSlots
-        data.extend(struct.pack('>I', self.nCodeSlots))  # nCodeSlots
-        data.extend(struct.pack('>I', self.codeLimit))  # codeLimit
-        data.extend(struct.pack('>B', self.hashSize))  # hashSize
-        data.extend(struct.pack('>B', self.hashType))  # hashType
-        data.extend(struct.pack('>B', self.platform))  # platform
-        data.extend(struct.pack('>B', self.pageSize))  # pageSize
-        data.extend(struct.pack('>I', self.spare2))  # spare2
-        data.extend(struct.pack('>I', self.scatterOffset))  # scatterOffset
-        data.extend(struct.pack('>I', self.teamOffset))  # teamOffset
-        data.extend(struct.pack('>I', self.spare3))  # spare3
-        data.extend(struct.pack('>Q', self.codeLimit64))  # codeLimit64
-        data.extend(struct.pack('>Q', self.execSegBase))  # execSegBase
-        data.extend(struct.pack('>Q', self.execSegLimit))  # execSegLimit
-        data.extend(struct.pack('>Q', self.execSegFlags))  # execSegFlags
-        data.extend(struct.pack('>Q', self.runtime))  # runtime
-        data.extend(struct.pack('>Q', self.preEncryptOffset))  # preEncryptOffset
+        
+        # Add header fields
+        data.extend(struct.pack('>I', self.magic))
+        data.extend(struct.pack('>I', self.length))
+        data.extend(struct.pack('>I', self.version))
+        data.extend(struct.pack('>I', self.flags))
+        data.extend(struct.pack('>I', self.hashOffset))
+        data.extend(struct.pack('>I', self.identOffset))
+        data.extend(struct.pack('>I', self.nSpecialSlots))
+        data.extend(struct.pack('>I', self.nCodeSlots))
+        data.extend(struct.pack('>I', self.codeLimit))
+        data.extend(struct.pack('>B', self.hashSize))
+        data.extend(struct.pack('>B', self.hashType))
+        data.extend(struct.pack('>B', self.platform))
+        data.extend(struct.pack('>B', self.pageSize))
+        data.extend(struct.pack('>I', self.spare2))
+        data.extend(struct.pack('>I', self.scatterOffset))
+        data.extend(struct.pack('>I', self.teamOffset))
+        data.extend(struct.pack('>I', self.spare3))
+        data.extend(struct.pack('>Q', self.codeLimit64))
+        data.extend(struct.pack('>Q', self.execSegBase))
+        data.extend(struct.pack('>Q', self.execSegLimit))
+        data.extend(struct.pack('>Q', self.execSegFlags))
+        data.extend(struct.pack('>Q', self.runtime))
+        data.extend(struct.pack('>Q', self.preEncryptOffset))
         
         # Add identifier
+        identifier_bytes = self.identifier.encode('ascii', errors='ignore') + b'\0'
         data.extend(identifier_bytes)
         
-        # Add padding to align
-        while len(data) < total_size:
+        # Pad to alignment
+        while len(data) % 4 != 0:
             data.append(0)
-            
+        
+        # Add hashes if present
+        if self.hashes:
+            for hash_value in self.hashes:
+                data.extend(hash_value)
+        
         return bytes(data)
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'CodeDirectory':
         """Create CodeDirectory from bytes."""
-        if len(data) < 44:  # Minimum size for base structure
+        if len(data) < 44:
             raise ValueError("Data too small for CodeDirectory")
             
         # Parse fixed fields
-        magic, length, version, flags = struct.unpack('>IIII', data[:16])
-        hashOffset, identOffset, nSpecialSlots, nCodeSlots = struct.unpack('>IIII', data[16:32])
-        codeLimit, hashSize, hashType, platform, pageSize = struct.unpack('>IBBBB', data[32:40])
+        (magic, length, version, flags, 
+         hashOffset, identOffset, nSpecialSlots, nCodeSlots,
+         codeLimit, hashSize, hashType, platform, pageSize) = struct.unpack(
+            '>IIIIIIII4B', data[:44]
+        )
+        
         spare2 = struct.unpack('>I', data[40:44])[0]
         
         # Get identifier
@@ -256,7 +298,7 @@ class CodeDirectory:
             end = len(data)
         identifier = data[identOffset:end].decode('ascii', errors='ignore')
         
-        # Create instance with minimum required fields
+        # Create instance
         return cls(
             magic=magic,
             length=length,
