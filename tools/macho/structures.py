@@ -144,11 +144,11 @@ class SuperBlob:
     @classmethod
     def from_bytes(cls, data: bytes) -> 'SuperBlob':
         if len(data) < 12:
-            raise ValueError("Data too small for SuperBlob")
+            raise ValueError("SuperBlob data too short")
             
         magic, length, count = struct.unpack('>III', data[:12])
-        
         blobs = []
+        
         offset = 12
         for _ in range(count):
             if offset + 8 > len(data):
@@ -157,12 +157,7 @@ class SuperBlob:
             blobs.append(blob)
             offset += 8
             
-        return cls(
-            magic=magic,
-            length=length,
-            count=count,
-            blobs=blobs
-        )
+        return cls(magic=magic, length=length, count=count, blobs=blobs)
 
 @dataclass
 class CodeDirectory:
@@ -191,41 +186,77 @@ class CodeDirectory:
     preEncryptOffset: int
     identifier: str
     teamId: Optional[str] = None
-    hashes: List[bytes] = None
+    hashes: Optional[List[bytes]] = None
+
+    def to_bytes(self) -> bytes:
+        """Convert CodeDirectory to bytes."""
+        # Calculate offsets and sizes
+        base_size = 44  # Size up to platform field
+        
+        # Convert identifier to bytes and add null terminator
+        identifier_bytes = self.identifier.encode('ascii', errors='ignore') + b'\0'
+        identifier_offset = base_size
+        total_size = base_size + len(identifier_bytes)
+        
+        # Align to 4 bytes
+        total_size = (total_size + 3) & ~3
+        
+        # Create the basic structure
+        data = bytearray()
+        data.extend(struct.pack('>I', self.magic))  # magic
+        data.extend(struct.pack('>I', total_size))  # length
+        data.extend(struct.pack('>I', self.version))  # version
+        data.extend(struct.pack('>I', self.flags))  # flags
+        data.extend(struct.pack('>I', self.hashOffset))  # hashOffset
+        data.extend(struct.pack('>I', identifier_offset))  # identOffset
+        data.extend(struct.pack('>I', self.nSpecialSlots))  # nSpecialSlots
+        data.extend(struct.pack('>I', self.nCodeSlots))  # nCodeSlots
+        data.extend(struct.pack('>I', self.codeLimit))  # codeLimit
+        data.extend(struct.pack('>B', self.hashSize))  # hashSize
+        data.extend(struct.pack('>B', self.hashType))  # hashType
+        data.extend(struct.pack('>B', self.platform))  # platform
+        data.extend(struct.pack('>B', self.pageSize))  # pageSize
+        data.extend(struct.pack('>I', self.spare2))  # spare2
+        data.extend(struct.pack('>I', self.scatterOffset))  # scatterOffset
+        data.extend(struct.pack('>I', self.teamOffset))  # teamOffset
+        data.extend(struct.pack('>I', self.spare3))  # spare3
+        data.extend(struct.pack('>Q', self.codeLimit64))  # codeLimit64
+        data.extend(struct.pack('>Q', self.execSegBase))  # execSegBase
+        data.extend(struct.pack('>Q', self.execSegLimit))  # execSegLimit
+        data.extend(struct.pack('>Q', self.execSegFlags))  # execSegFlags
+        data.extend(struct.pack('>Q', self.runtime))  # runtime
+        data.extend(struct.pack('>Q', self.preEncryptOffset))  # preEncryptOffset
+        
+        # Add identifier
+        data.extend(identifier_bytes)
+        
+        # Add padding to align
+        while len(data) < total_size:
+            data.append(0)
+            
+        return bytes(data)
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'CodeDirectory':
-        if len(data) < 44:
+        """Create CodeDirectory from bytes."""
+        if len(data) < 44:  # Minimum size for base structure
             raise ValueError("Data too small for CodeDirectory")
             
+        # Parse fixed fields
         magic, length, version, flags = struct.unpack('>IIII', data[:16])
         hashOffset, identOffset, nSpecialSlots, nCodeSlots = struct.unpack('>IIII', data[16:32])
         codeLimit, hashSize, hashType, platform, pageSize = struct.unpack('>IBBBB', data[32:40])
         spare2 = struct.unpack('>I', data[40:44])[0]
         
-        # Get identifier string
-        if identOffset:
-            identifier = data[identOffset:].split(b'\0')[0].decode('utf-8')
-        else:
-            identifier = ""
-            
-        # Get team ID if present
-        teamId = None
-        if version >= 0x20200:
-            teamOffset = struct.unpack('>I', data[88:92])[0]
-            if teamOffset:
-                teamId = data[teamOffset:].split(b'\0')[0].decode('utf-8')
-                
-        # Get hashes
-        hashes = []
-        if hashOffset:
-            hash_start = hashOffset - (nSpecialSlots * hashSize)
-            for i in range(nSpecialSlots + nCodeSlots):
-                if hash_start + (i * hashSize) + hashSize > len(data):
-                    break
-                hash_data = data[hash_start + (i * hashSize):hash_start + (i * hashSize) + hashSize]
-                hashes.append(hash_data)
-                
+        # Get identifier
+        if identOffset >= len(data):
+            raise ValueError("Invalid identifier offset")
+        end = data.find(b'\0', identOffset)
+        if end == -1:
+            end = len(data)
+        identifier = data[identOffset:end].decode('ascii', errors='ignore')
+        
+        # Create instance with minimum required fields
         return cls(
             magic=magic,
             length=length,
@@ -250,7 +281,5 @@ class CodeDirectory:
             execSegFlags=0,
             runtime=0,
             preEncryptOffset=0,
-            identifier=identifier,
-            teamId=teamId,
-            hashes=hashes
+            identifier=identifier
         )

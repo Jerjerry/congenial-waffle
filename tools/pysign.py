@@ -31,7 +31,13 @@ class IPASigner:
         self.temp_dir = None
         self.app_dir = None
         self.provision_file = None
-        self.entitlements = None
+        self.entitlements = {
+            'application-identifier': '*',
+            'get-task-allow': True,
+            'keychain-access-groups': ['*'],
+            'com.apple.developer.team-identifier': '*',
+            'com.apple.security.application-groups': ['*'],
+        }
         
     def load_p12(self, p12_path, password=None):
         """Load certificate and private key from .p12 file"""
@@ -111,23 +117,18 @@ class IPASigner:
         try:
             logger.info(f"Signing binary: {binary_path}")
             
-            # Parse the Mach-O binary
-            parser = MachOParser(binary_path)
-            
-            # Get the bundle ID from Info.plist for identifier
-            info_plist_path = os.path.join(self.app_dir, 'Info.plist')
-            with open(info_plist_path, 'rb') as f:
-                info_plist = plistlib.load(f)
-            bundle_id = info_plist['CFBundleIdentifier']
-            
-            # Create code signature
+            # Read the binary
             with open(binary_path, 'rb') as f:
                 macho_data = f.read()
                 
-            builder = CodeSignatureBuilder(macho_data, private_key, certificate)
-            signature = builder.build(bundle_id)
+            # Parse the Mach-O binary
+            parser = MachOParser(macho_data)
             
-            # Write the signed binary
+            # Build code signature
+            builder = CodeSignatureBuilder(macho_data, private_key, certificate)
+            signature = builder.build()
+            
+            # Write signed binary
             with open(binary_path, 'wb') as f:
                 f.write(macho_data)
                 f.write(signature)
@@ -135,8 +136,8 @@ class IPASigner:
             logger.info(f"Successfully signed binary: {binary_path}")
             
         except Exception as e:
-            logger.error(f"Failed to sign binary {binary_path}: {str(e)}")
-            raise Exception(f"Failed to sign binary {binary_path}: {str(e)}")
+            logger.error(f"Failed to sign binary: {str(e)}")
+            raise Exception(f"Failed to sign binary: {str(e)}")
             
     def inject_dylib(self, binary_path, dylib_path, weak=False):
         """Inject dylib into binary"""

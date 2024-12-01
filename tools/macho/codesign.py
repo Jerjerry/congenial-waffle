@@ -46,7 +46,7 @@ class CodeSignatureBuilder:
         cd_size = 44  # Base size up to platform field
         
         # Add identifier as null-terminated string
-        identifier_bytes = identifier.encode('utf-8') + b'\0'
+        identifier_bytes = identifier.encode('ascii', errors='ignore') + b'\0'
         identifier_offset = cd_size
         cd_size += len(identifier_bytes)
         
@@ -63,14 +63,14 @@ class CodeSignatureBuilder:
         cd.extend(struct.pack('>I', CSMAGIC_CODEDIRECTORY))  # magic
         cd.extend(struct.pack('>I', cd_size))  # length
         cd.extend(struct.pack('>I', 0x20400))  # version
-        cd.extend(struct.pack('>I', 0))  # flags
+        cd.extend(struct.pack('>I', CS_ADHOC | CS_GET_TASK_ALLOW))  # flags
         cd.extend(struct.pack('>I', hash_offset))  # hashOffset
         cd.extend(struct.pack('>I', identifier_offset))  # identOffset
         cd.extend(struct.pack('>I', 0))  # nSpecialSlots
         cd.extend(struct.pack('>I', len(code_hashes)))  # nCodeSlots
         cd.extend(struct.pack('>I', code_limit))  # codeLimit
         cd.extend(struct.pack('>B', hash_size))  # hashSize
-        cd.extend(struct.pack('>B', 2))  # hashType (SHA256)
+        cd.extend(struct.pack('>B', CS_HASHTYPE_SHA256))  # hashType
         cd.extend(struct.pack('>B', 0))  # platform
         cd.extend(struct.pack('>B', 12))  # pageSize (log2(page_size))
         cd.extend(struct.pack('>I', 0))  # spare2
@@ -106,52 +106,84 @@ class CodeSignatureBuilder:
         # For now, just return the raw signature
         return signature
         
-    def build(self, identifier: str) -> bytes:
-        """Build the complete code signature."""
-        try:
-            # Find the code limit (size of binary without existing signature)
-            code_limit = len(self.macho_data)
-            
-            # Calculate code hashes
-            code_hashes = self._calculate_code_hashes(code_limit)
-            
-            # Build Code Directory
-            code_directory = self._build_code_directory(identifier, code_limit, code_hashes)
-            
-            # Sign the Code Directory
-            signature = self._sign_code_directory(code_directory)
-            
-            # Build SuperBlob
-            superblob = bytearray()
-            
-            # SuperBlob header
-            blob_count = 2  # CodeDirectory and Signature
-            superblob_size = 12 + (blob_count * 8)  # Header + BlobIndex entries
-            
-            # Calculate offsets for blobs
-            cd_offset = superblob_size
-            sig_offset = cd_offset + len(code_directory)
-            total_size = sig_offset + len(signature)
-            
-            # Write SuperBlob header
-            superblob.extend(struct.pack('>I', CSMAGIC_EMBEDDED_SIGNATURE))
-            superblob.extend(struct.pack('>I', total_size))
-            superblob.extend(struct.pack('>I', blob_count))
-            
-            # Write BlobIndex entries
-            superblob.extend(struct.pack('>II', CS_SLOTID_CODEDIRECTORY, cd_offset))
-            superblob.extend(struct.pack('>II', CS_SLOTID_SIGNATURE, sig_offset))
-            
-            # Add the blobs
-            superblob.extend(code_directory)
-            superblob.extend(signature)
-            
-            return bytes(superblob)
-            
-        except Exception as e:
-            logger.error(f"Failed to build code signature: {str(e)}")
-            raise
-
+    def build(self) -> bytes:
+        """Build the code signature data."""
+        # Calculate code hashes
+        code_limit = len(self.macho_data)
+        code_hashes = self._calculate_code_hashes(code_limit)
+        
+        # Calculate base size and offsets
+        base_size = 8  # SuperBlob header
+        base_size += 8  # One BlobIndex
+        
+        # Create CodeDirectory
+        identifier = "*"  # Default identifier
+        cd = CodeDirectory(
+            magic=CSMAGIC_CODEDIRECTORY,
+            length=0,  # Will be calculated during to_bytes()
+            version=0x20400,  # Latest version
+            flags=CS_ADHOC | CS_GET_TASK_ALLOW,  # Enable debugging
+            hashOffset=0,  # Will be calculated during to_bytes()
+            identOffset=0,  # Will be calculated during to_bytes()
+            nSpecialSlots=0,
+            nCodeSlots=len(code_hashes),
+            codeLimit=code_limit,
+            hashSize=32,  # SHA256
+            hashType=CS_HASHTYPE_SHA256,
+            platform=0,  # Not platform specific
+            pageSize=12,  # 4096 (2^12)
+            spare2=0,
+            scatterOffset=0,
+            teamOffset=0,
+            spare3=0,
+            codeLimit64=0,
+            execSegBase=0,
+            execSegLimit=0,
+            execSegFlags=0,
+            runtime=0,
+            preEncryptOffset=0,
+            identifier=identifier,
+            hashes=code_hashes
+        )
+        
+        # Convert CodeDirectory to bytes
+        cd_data = cd.to_bytes()
+        cd_offset = base_size
+        
+        # Create blob index for CodeDirectory
+        cd_index = BlobIndex(
+            type=CS_SLOTID_CODEDIRECTORY,
+            offset=cd_offset
+        )
+        
+        # Create SuperBlob
+        sb = SuperBlob(
+            magic=CSMAGIC_EMBEDDED_SIGNATURE,
+            length=base_size + len(cd_data),
+            count=1,
+            blobs=[cd_index]
+        )
+        
+        # Build the complete signature
+        signature = bytearray()
+        
+        # Add SuperBlob header
+        signature.extend(struct.pack('>I', sb.magic))
+        signature.extend(struct.pack('>I', sb.length))
+        signature.extend(struct.pack('>I', sb.count))
+        
+        # Add BlobIndex
+        signature.extend(struct.pack('>II', cd_index.type, cd_index.offset))
+        
+        # Add CodeDirectory data
+        signature.extend(cd_data)
+        
+        # Add code hashes
+        for hash_value in code_hashes:
+            signature.extend(hash_value)
+        
+        return bytes(signature)
+        
     def verify(self, signature: bytes) -> bool:
         """Verify a code signature"""
         try:

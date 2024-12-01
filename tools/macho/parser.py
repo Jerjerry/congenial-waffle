@@ -5,8 +5,11 @@ from .structures import MachHeader, LoadCommand, SegmentCommand64, Section64, Co
 from .constants import *
 
 class MachOParser:
-    def __init__(self, filepath: str):
-        self.filepath = filepath
+    def __init__(self, macho_data: bytes):
+        """Initialize parser with Mach-O binary data"""
+        self.macho_data = macho_data
+        self.is_64bit = False
+        self.is_little_endian = False
         self.header = None
         self.load_commands = []
         self.code_signature = None
@@ -17,25 +20,18 @@ class MachOParser:
         self.logger = logging.getLogger(__name__)
         
         try:
-            with open(filepath, 'rb') as f:
-                self.data = f.read()
-                
-            if len(self.data) < 4:
-                raise ValueError(f"File {filepath} is too small to be a Mach-O binary")
-                
-            self.offset = 0
             self._parse_header()
             self._parse_load_commands()
             
         except Exception as e:
-            self.logger.error(f"Failed to parse Mach-O binary {filepath}: {str(e)}")
+            self.logger.error(f"Failed to parse Mach-O binary: {str(e)}")
             raise
             
     def _read_bytes(self, size: int) -> bytes:
         """Read bytes from the binary at current offset."""
-        if self.offset + size > len(self.data):
+        if self.offset + size > len(self.macho_data):
             raise ValueError(f"Attempted to read beyond end of file (offset {self.offset}, size {size})")
-        data = self.data[self.offset:self.offset + size]
+        data = self.macho_data[self.offset:self.offset + size]
         self.offset += size
         return data
         
@@ -54,71 +50,79 @@ class MachOParser:
             raise ValueError(f"Failed to read uint64 at offset {self.offset}: {str(e)}")
             
     def _parse_header(self):
-        """Parse the Mach-O header."""
-        try:
-            magic = struct.unpack('<I', self.data[:4])[0]
+        """Parse Mach-O header"""
+        # Read magic number
+        magic = int.from_bytes(self.macho_data[:4], byteorder='big')
+        
+        # Determine format
+        if magic == 0xfeedface:  # 32-bit
+            self.is_64bit = False
+            self.is_little_endian = False
+        elif magic == 0xcefaedfe:  # 32-bit, little-endian
+            self.is_64bit = False
+            self.is_little_endian = True
+        elif magic == 0xfeedfacf:  # 64-bit
+            self.is_64bit = True
+            self.is_little_endian = False
+        elif magic == 0xcffaedfe:  # 64-bit, little-endian
+            self.is_64bit = True
+            self.is_little_endian = True
+        else:
+            raise ValueError(f"Invalid Mach-O magic: {magic:08x}")
             
-            if magic not in [MH_MAGIC, MH_MAGIC_64, MH_CIGAM, MH_CIGAM_64]:
-                raise ValueError(f"Invalid Mach-O magic: {hex(magic)}")
-                
-            is_64bit = magic in [MH_MAGIC_64, MH_CIGAM_64]
-            is_swap = magic in [MH_CIGAM, MH_CIGAM_64]
+        is_swap = magic in [MH_CIGAM, MH_CIGAM_64]
             
-            if is_64bit:
-                header_size = 32  # Size of mach_header_64
-            else:
-                header_size = 28  # Size of mach_header
+        if self.is_64bit:
+            header_size = 32  # Size of mach_header_64
+        else:
+            header_size = 28  # Size of mach_header
                 
-            if len(self.data) < header_size:
-                raise ValueError(f"File is too small for Mach-O header (size: {len(self.data)})")
+        if len(self.macho_data) < header_size:
+            raise ValueError(f"File is too small for Mach-O header (size: {len(self.macho_data)})")
                 
-            # Parse header fields
-            header_data = self.data[:header_size]
-            if is_64bit:
-                fields = struct.unpack('<IIIIIIII', header_data)
-            else:
-                fields = struct.unpack('<IIIIIII', header_data)
+        # Parse header fields
+        header_data = self.macho_data[:header_size]
+        if self.is_64bit:
+            fields = struct.unpack('<IIIIIIII' if self.is_little_endian else '>IIIIIIII', header_data)
+        else:
+            fields = struct.unpack('<IIIIIII' if self.is_little_endian else '>IIIIIII', header_data)
                 
-            self.header = MachHeader(
-                magic=fields[0],
-                cputype=fields[1],
-                cpusubtype=fields[2],
-                filetype=fields[3],
-                ncmds=fields[4],
-                sizeofcmds=fields[5],
-                flags=fields[6]
-            )
+        self.header = MachHeader(
+            magic=fields[0],
+            cputype=fields[1],
+            cpusubtype=fields[2],
+            filetype=fields[3],
+            ncmds=fields[4],
+            sizeofcmds=fields[5],
+            flags=fields[6]
+        )
             
-            self.offset = header_size
-            self.logger.debug(f"Parsed Mach-O header: {self.header}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to parse Mach-O header: {str(e)}")
-            raise
+        self.offset = header_size
+        self.logger.debug(f"Parsed Mach-O header: {self.header}")
             
     def _parse_load_commands(self):
         """Parse all load commands."""
         try:
             for i in range(self.header.ncmds):
-                if self.offset + 8 > len(self.data):
+                if self.offset + 8 > len(self.macho_data):
                     raise ValueError(f"Unexpected end of file while parsing load command {i}")
                     
-                cmd, cmdsize = struct.unpack('<II', self.data[self.offset:self.offset + 8])
+                cmd, cmdsize = struct.unpack('<II' if self.is_little_endian else '>II', self.macho_data[self.offset:self.offset + 8])
                 
                 if cmdsize < 8:
                     raise ValueError(f"Invalid load command size: {cmdsize}")
                     
-                if self.offset + cmdsize > len(self.data):
+                if self.offset + cmdsize > len(self.macho_data):
                     raise ValueError(f"Load command {i} extends beyond end of file")
                     
-                command_data = self.data[self.offset:self.offset + cmdsize]
+                command_data = self.macho_data[self.offset:self.offset + cmdsize]
                 
                 if cmd == LC_SEGMENT_64:
                     segname = command_data[8:24].decode('utf-8').rstrip('\0')
                     self.logger.debug(f"Parsed segment {segname} with 0 sections")
                 elif cmd == LC_CODE_SIGNATURE:
                     if cmdsize >= 16:
-                        self.code_signature_offset, self.code_signature_size = struct.unpack('<II', command_data[8:16])
+                        self.code_signature_offset, self.code_signature_size = struct.unpack('<II' if self.is_little_endian else '>II', command_data[8:16])
                         self.logger.debug(f"Found code signature at offset {self.code_signature_offset}, size {self.code_signature_size}")
                         
                 self.load_commands.append(LoadCommand(cmd=cmd, cmdsize=cmdsize, data=command_data))
@@ -131,10 +135,26 @@ class MachOParser:
             raise
             
     def get_code_signature_data(self) -> Optional[bytes]:
-        """Get the code signature data if present."""
-        if self.code_signature_offset is not None and self.code_signature_size is not None:
-            if self.code_signature_offset + self.code_signature_size <= len(self.data):
-                return self.data[self.code_signature_offset:self.code_signature_offset + self.code_signature_size]
+        """Get existing code signature data if present"""
+        # Find LC_CODE_SIGNATURE load command
+        cmd_size = 8
+        offset = 28 if self.is_64bit else 24
+        
+        while offset < len(self.macho_data):
+            cmd = int.from_bytes(self.macho_data[offset:offset+4], 
+                               byteorder='little' if self.is_little_endian else 'big')
+            cmdsize = int.from_bytes(self.macho_data[offset+4:offset+8],
+                                   byteorder='little' if self.is_little_endian else 'big')
+            
+            if cmd == 0x1d:  # LC_CODE_SIGNATURE
+                data_offset = int.from_bytes(self.macho_data[offset+8:offset+12],
+                                          byteorder='little' if self.is_little_endian else 'big')
+                data_size = int.from_bytes(self.macho_data[offset+12:offset+16],
+                                        byteorder='little' if self.is_little_endian else 'big')
+                return self.macho_data[data_offset:data_offset+data_size]
+                
+            offset += cmdsize
+            
         return None
         
     def get_code_directory(self) -> Optional[CodeDirectory]:

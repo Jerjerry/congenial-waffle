@@ -19,15 +19,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.env
 
 # Virtual Environment
 venv/
-env/
-ENV/
+.venv/
 
 # IDE
-.idea/
 .vscode/
+.idea/
+*.iml
 *.swp
 *.swo
 
