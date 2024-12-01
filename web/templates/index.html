@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPA Signer</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">IPA Signer</h1>
+            <p class="text-gray-600">Sign and modify your iOS applications</p>
+        </div>
+
+        <!-- Main Form -->
+        <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl mx-auto">
+            <form id="signForm" class="space-y-6">
+                <!-- IPA File -->
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">
+                        IPA File <span class="text-red-500">*</span>
+                    </label>
+                    <div class="relative">
+                        <input type="file" id="ipa" name="ipa" accept=".ipa" required
+                            class="hidden" onchange="updateFileName(this, 'ipaLabel')">
+                        <label for="ipa" id="ipaLabel"
+                            class="cursor-pointer bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                            Choose IPA file...
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Certificate -->
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">
+                        Certificate (P12) <span class="text-red-500">*</span>
+                    </label>
+                    <div class="relative">
+                        <input type="file" id="certificate" name="certificate" accept=".p12" required
+                            class="hidden" onchange="updateFileName(this, 'certLabel')">
+                        <label for="certificate" id="certLabel"
+                            class="cursor-pointer bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                            Choose certificate...
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Certificate Password -->
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">
+                        Certificate Password
+                    </label>
+                    <input type="password" id="password" name="password"
+                        class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                </div>
+
+                <!-- Bundle ID -->
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">
+                        Bundle ID
+                    </label>
+                    <input type="text" id="bundleId" name="bundleId" placeholder="com.example.app"
+                        class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                </div>
+
+                <!-- Dylib -->
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">
+                        Dylib (Optional)
+                    </label>
+                    <div class="relative">
+                        <input type="file" id="dylib" name="dylib" accept=".dylib"
+                            class="hidden" onchange="updateFileName(this, 'dylibLabel')">
+                        <label for="dylib" id="dylibLabel"
+                            class="cursor-pointer bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+                            Choose dylib...
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Weak Dylib -->
+                <div class="flex items-center">
+                    <input type="checkbox" id="weakDylib" name="weakDylib"
+                        class="w-4 h-4 text-blue-600 bg-gray-100 rounded border-gray-300 focus:ring-blue-500">
+                    <label for="weakDylib" class="ml-2 text-sm font-medium text-gray-900">
+                        Inject as Weak Dylib
+                    </label>
+                </div>
+
+                <!-- Submit Button -->
+                <button type="submit"
+                    class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center">
+                    Sign IPA
+                </button>
+            </form>
+
+            <!-- Progress -->
+            <div id="progress" class="hidden mt-6">
+                <div class="flex items-center justify-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span class="ml-3 text-gray-600">Signing in progress...</span>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error" class="hidden mt-6 p-4 bg-red-100 text-red-700 rounded-lg">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateFileName(input, labelId) {
+            const label = document.getElementById(labelId);
+            label.textContent = input.files[0] ? input.files[0].name : 'Choose file...';
+        }
+
+        document.getElementById('signForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Hide error and show progress
+            document.getElementById('error').classList.add('hidden');
+            document.getElementById('progress').classList.remove('hidden');
+
+            // Prepare form data
+            const formData = new FormData(e.target);
+
+            try {
+                const response = await fetch('/api/sign', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Signing failed');
+                }
+
+                // Get the filename from the Content-Disposition header
+                const disposition = response.headers.get('Content-Disposition');
+                const filename = disposition.split('filename=')[1].replace(/"/g, '');
+
+                // Create a download link
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+            } catch (error) {
+                document.getElementById('error').textContent = error.message;
+                document.getElementById('error').classList.remove('hidden');
+            } finally {
+                document.getElementById('progress').classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+cryptography>=41.0.0
+pyinstaller>=6.1.0
+pathlib>=1.0.1
+tkinter
