@@ -1,103 +1,108 @@
-# IPA Signer Tool
+# IPA Signer
 
-A cross-platform GUI application for signing iOS IPA files. This tool provides a simple and user-friendly interface for signing iOS applications with custom certificates.
+A cross-platform tool for signing and modifying iOS application binaries.
 
 ## Features
 
-- User-friendly graphical interface
-- Support for .p12 certificate files
-- Password-protected certificate support
-- Automatic code signing and IPA packaging
-- Detailed logging for troubleshooting
-- Cross-platform compatibility (Windows, macOS, Linux)
+- Cross-platform support (Windows, macOS, Linux)
+- Universal binary (fat binary) support
+- Robust Mach-O binary parsing
+- Certificate and provisioning profile validation
+- Detailed error reporting and logging
+- Special handling for complex frameworks and dylibs
+
+## Requirements
+
+- Python 3.11+
+- cryptography library
+- tkinter (for GUI features)
 
 ## Installation
 
-1. Download the latest release from the [Releases](https://github.com/yourusername/ipa_signer/releases) page
-2. Extract the archive to your desired location
-3. Run `IPA_Signer.exe` (Windows) or `IPA_Signer` (macOS/Linux)
-
-### Building from Source
-
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/ipa_signer.git
-   cd ipa_signer
-   ```
+```bash
+git clone https://github.com/yourusername/ipa-signer.git
+cd ipa-signer
+```
 
 2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Build the executable:
-   ```bash
-   python build_exe.py
-   ```
-
-The executable will be created in the `dist` directory.
+```bash
+pip install -r requirements.txt
+```
 
 ## Usage
 
-1. Launch the IPA Signer application
-2. Click "Browse" to select your IPA file
-3. Click "Browse" to select your P12 certificate
-4. Enter the certificate password (if required)
-5. Click "Sign IPA" to begin the signing process
-6. The signed IPA will be created with "_signed" appended to the original filename
+### Command Line
 
-## Project Structure
-
-```
-ipa_signer/
-├── gui_app.py           # Main GUI application
-├── build_exe.py         # PyInstaller build script
-├── requirements.txt     # Python dependencies
-├── tools/
-│   ├── pysign.py       # Core signing functionality
-│   └── macho/          # Mach-O binary handling
-│       ├── codesign.py # Code signature generation
-│       ├── parser.py   # Binary parsing
-│       └── structures.py # Data structures
-└── docs/               # Documentation
+```bash
+python -m src.enhanced_signer --ipa path/to/app.ipa --cert path/to/cert.p12 --profile path/to/profile.mobileprovision --output path/to/output.ipa
 ```
 
-## Dependencies
+### Environment Variables
 
-- Python 3.11+
-- tkinter
-- cryptography
-- PyInstaller (for building)
+- `TEST_P12_PATH`: Path to test certificate
+- `TEST_P12_PASS`: Certificate password
+- `TEST_IPA_PATH`: Path to test IPA for signing
 
-## Logging
+## Recent Updates
 
-The application logs all operations to `signer.log` in the application directory. This file is useful for troubleshooting any issues that may occur during the signing process.
+### Version 1.1.0
+- Added robust universal binary support
+- Improved Mach-O binary parsing with endianness detection
+- Enhanced error handling for binary structures
+- Added special handling for CydiaSubstrate and complex dylibs
+- Improved logging and progress reporting
+
+### Version 1.0.0
+- Initial release with basic signing capabilities
+- Certificate validation
+- Provisioning profile support
+
+## Technical Details
+
+### Mach-O Binary Handling
+- Automatic endianness detection
+- Universal binary slice extraction
+- Load command parsing and validation
+- Section parsing with robust error handling
+- Special case handling for complex binaries
+
+### Security Features
+- Certificate validation
+- Provisioning profile compatibility checks
+- Secure password handling
+- Binary integrity verification
+
+## Testing
+
+Run the test suite:
+```bash
+python tests/run_real_test.py
+```
+
+Generate test IPA:
+```bash
+python tests/create_test_ipa.py
+```
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## Known Limitations
+
+- Some complex frameworks require special handling
+- Universal binary support is focused on ARM64 and x86_64
+- Certificate must be in P12 format
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT License](LICENSE)
 
 ## Acknowledgments
 
-- [cryptography](https://github.com/pyca/cryptography) for certificate handling
-- [PyInstaller](https://www.pyinstaller.org/) for executable creation
-
-## Support
-
-If you encounter any issues or have questions, please:
-
-1. Check the log file (`signer.log`)
-2. Open an issue in the GitHub repository
-3. Provide the log file and steps to reproduce the issue
-
-## Disclaimer
-
-This tool is provided as-is without any warranty. Always ensure you have the right to modify and sign iOS applications in your jurisdiction.
+Thanks to the iOS development community for their insights into the code signing process.
