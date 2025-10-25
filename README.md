@@ -21,7 +21,7 @@ A cross-platform tool for signing and modifying iOS application binaries.
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ipa-signer.git
+git clone https://github.com/jerjerry/ipa-signer.git
 cd ipa-signer
 ```
 
